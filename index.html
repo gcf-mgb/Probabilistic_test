@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hazard Explorer - Satellite Click Edition</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+<style>
+    html, body, #map { height:100%; margin:0; background:#000; }
+    .control {
+        position:absolute; top:12px; left:12px; z-index:10;
+        background:rgba(255, 255, 255, 0.9); border-radius:10px; padding:14px; 
+        font:12px system-ui, sans-serif; width:260px; box-shadow:0 4px 15px rgba(0,0,0,0.5);
+    }
+    .legend-grid { display:grid; grid-template-columns:20px 1fr; gap:6px 10px; margin-top:10px; }
+    .swatch { width:20px; height:12px; border-radius:2px; border: 1px solid rgba(0,0,0,0.1); }
+    select, input { width: 100%; margin-top: 5px; cursor: pointer; }
+    .slider-label { display: flex; justify-content: space-between; margin-top: 15px; font-weight: bold; color: #444; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="control">
+    <b style="font-size: 14px;">Hazard Probability</b><br><br>
+    
+    <label style="font-weight: bold; color: #444;">Select Return Period:</label>
+    <select id="returnPeriod"></select>
+    
+    <div class="slider-label">
+        <span>Map Opacity</span>
+        <span id="opacityVal">100%</span>
+    </div>
+    <input type="range" id="opacitySlider" min="0" max="100" value="100">
+
+    <div style="margin-top: 15px; border-top: 1px solid #eee; padding-top: 10px;">
+        <b style="color: #444;">Probability Legend</b>
+        <div class="legend-grid" id="legend"></div>
+    </div>
+    <div id="status" style="margin-top:12px; font-size:10px; color:#888;">Ready</div>
+</div>
+
+<script>
+/* ==============================
+   1. CONFIG & COLORS
+============================== */
+const PMTILES_FILE = "Temp_Prob.pmtiles";
+const SOURCE_LAYER = "slope_units";
+let DETECTED_ID_FIELD = "OBJECTID1"; 
+
+const RETURN_PERIODS = [
+    { field: "predicte_7", label: "2 year RP" }, { field: "predicte_8", label: "5 year RP" },
+    { field: "predicte_9", label: "10 year RP" }, { field: "predict_10", label: "15 year RP" },
+    { field: "predict_11", label: "20 year RP" }, { field: "predict_12", label: "25 year RP" },
+    { field: "predict_13", label: "50 year RP" }, { field: "predict_14", label: "100 year RP" }
+];
+
+const COLORS = ["#147218", "#7CB815", "#F2FE2A", "#FFAC18", "#FE3C19"];
+const BINS = [0, 0.2, 0.4, 0.6, 0.8, 1.01];
+
+/* ==============================
+   2. PMTILES SETUP
+============================== */
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const absURL = new URL(PMTILES_FILE, window.location.href).href;
+const p = new pmtiles.PMTiles(absURL);
+protocol.add(p);
+
+/* ==============================
+   3. UI ELEMENTS
+============================== */
+const select = document.getElementById("returnPeriod");
+const opacitySlider = document.getElementById("opacitySlider");
+const opacityVal = document.getElementById("opacityVal");
+
+RETURN_PERIODS.forEach((r, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = r.label;
+    select.appendChild(o);
+});
+
+function fillColor(field) {
+    return ["step", ["coalesce", ["to-number", ["get", field]], 0],
+        COLORS[0], BINS[1], COLORS[1], BINS[2], COLORS[2], BINS[3], COLORS[3], BINS[4], COLORS[4]
+    ];
+}
+
+function buildLegend() {
+    const l = document.getElementById("legend");
+    const labels = ["0–20%", "20–40%", "40–60%", "60–80%", "80–100%"];
+    l.innerHTML = COLORS.map((c, i) => `<div class="swatch" style="background:${c}"></div><div>${labels[i]}</div>`).join('');
+}
+
+/* ==============================
+   4. MAP SETUP (GOOGLE SATELLITE)
+============================== */
+const map = new maplibregl.Map({
+    container: "map",
+    style: {
+        version: 8,
+        sources: {
+            "google-satellite": {
+                type: "raster",
+                tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"],
+                tileSize: 256,
+                attribution: "Google"
+            },
+            hazard: { type: "vector", url: `pmtiles://${absURL}` }
+        },
+        layers: [
+            { id: "satellite", type: "raster", source: "google-satellite" },
+            {
+                id: "haz_fill", 
+                type: "fill", 
+                source: "hazard", 
+                "source-layer": SOURCE_LAYER,
+                paint: { 
+                    "fill-color": fillColor(RETURN_PERIODS[0].field), 
+                    "fill-opacity": 1 
+                }
+            },
+            {
+                id: "haz_outline",
+                type: "line",
+                source: "hazard",
+                "source-layer": SOURCE_LAYER,
+                paint: {
+                    "line-color": "#00ffff",
+                    "line-width": 4,
+                    "line-opacity": 1
+                },
+                filter: ["==", ["get", "NON_EXISTENT"], ""]
+            }
+        ]
+    }
+});
+
+/* ==============================
+   5. INTERACTION & LOGIC
+============================== */
+map.on("load", async () => {
+    buildLegend();
+    const h = await p.getHeader();
+    map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], { padding: 50, duration: 0 });
+});
+
+// Sync Slider to both Fill and Cyan Outline
+opacitySlider.oninput = (e) => {
+    const val = e.target.value / 100;
+    map.setPaintProperty("haz_fill", "fill-opacity", val);
+    map.setPaintProperty("haz_outline", "line-opacity", val);
+    opacityVal.innerText = e.target.value + "%";
+};
+
+select.onchange = () => {
+    map.setPaintProperty("haz_fill", "fill-color", fillColor(RETURN_PERIODS[select.value].field));
+};
+
+const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: true });
+
+map.on("click", "haz_fill", (e) => {
+    const props = e.features[0].properties;
+    
+    // 1. Detect ID Field
+    if (!(DETECTED_ID_FIELD in props)) {
+        const possibleFields = ["OBJECTID", "FID", "id", "fid", "id_0"];
+        for (let f of possibleFields) {
+            if (f in props) { DETECTED_ID_FIELD = f; break; }
+        }
+    }
+
+    // 2. Set Cyan Outline on CLICK only
+    const idValue = props[DETECTED_ID_FIELD];
+    map.setFilter("haz_outline", ["==", ["get", DETECTED_ID_FIELD], idValue]);
+
+    // 3. Build Popup
+    let html = `<div style="padding:5px; font-family: sans-serif;">
+                  <b style="font-size:13px;">Hazard Data</b>
+                  <hr style="margin: 5px 0; border:0; border-top:1px solid #eee;">
+                  <table style="font-size:11px; width:100%;">`;
+    for (const r of RETURN_PERIODS) {
+        const val = (parseFloat(props[r.field]) * 100).toFixed(1) + "%";
+        html += `<tr><td>${r.label}:</td><td style="text-align:right;"><b>${val}</b></td></tr>`;
+    }
+    html += `</table></div>`;
+    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+});
+
+// Clear cyan outline when popup is closed
+popup.on('close', () => {
+    map.setFilter("haz_outline", ["==", ["get", "NON_EXISTENT"], ""]);
+});
+
+// Cursor changes
+map.on("mouseenter", "haz_fill", () => map.getCanvas().style.cursor = "pointer");
+map.on("mouseleave", "haz_fill", () => map.getCanvas().style.cursor = "");
+
+</script>
+</body>
+</html>
