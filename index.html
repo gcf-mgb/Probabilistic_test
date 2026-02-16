@@ -31,16 +31,16 @@ select,input { width:100%; margin-top:5px; cursor:pointer; box-sizing:border-box
     <select id="returnPeriod"></select>
 
     <label class="section-title">User Landslide Area (sqm):</label>
-    <input type="number" id="userArea" value="1000" step="0.1" min="0">
+    <input type="number" id="userArea" value="0" step="0.1" min="0">
 
     <label class="section-title">Resulting Probability:</label>
-    <input type="text" id="userProb" value="" readonly style="background:#eee; text-align:right;">
+    <input type="text" id="userProb" value="0.0000" readonly style="background:#eee; text-align:right;">
 
     <div class="slider-label">
         <span>Map Opacity</span>
-        <span id="opacityVal">100%</span>
+        <span id="opacityVal">70%</span>
     </div>
-    <input type="range" id="opacitySlider" min="0" max="100" value="100">
+    <input type="range" id="opacitySlider" min="0" max="100" value="70">
 
     <div style="margin-top:15px; border-top:1px solid #eee; padding-top:10px;">
         <b style="color:#444;">Adjusted Probability Legend</b>
@@ -51,7 +51,6 @@ select,input { width:100%; margin-top:5px; cursor:pointer; box-sizing:border-box
 
 <script>
 // ---------------- CONFIG ----------------
-// Use full Media URL to ensure LFS data is pulled correctly
 const PMTILES_FILE = "https://media.githubusercontent.com/media/gcf-mgb/Probabilistic_test/main/Temp_Prob_v2.pmtiles";
 const SOURCE_LAYER = "slope_units";
 const CSV_FILE = "probability_lookup_1_to_5000.csv"; 
@@ -115,10 +114,11 @@ async function loadProbCSV() {
     }
 }
 
-// ---------------- Logic: Interpolation ----------------
+// ---------------- Logic: Interpolation (4 Decimals) ----------------
 function computeUserProb() {
     let aL = parseFloat(userArea.value);
-    if(aL <= 0) { userProb.value="1.00000000"; return 1; }
+    // Modified to start at 0
+    if(aL <= 0) { userProb.value="0.0000"; return 0; }
     aL = Math.min(Math.max(aL, 1), 5000);
 
     const lower = Math.floor(aL);
@@ -127,7 +127,7 @@ function computeUserProb() {
     const probUpper = probLookup[upper] ?? probLower;
     const prob = probLower + (probUpper - probLower) * (aL - lower);
 
-    userProb.value = prob.toFixed(8);
+    userProb.value = prob.toFixed(4); // 4 decimal places
     return prob;
 }
 
@@ -175,14 +175,21 @@ const map = new maplibregl.Map({
                 type: "fill",
                 source: "hazard",
                 "source-layer": SOURCE_LAYER,
-                paint: { "fill-color": COLORS[0], "fill-opacity": 1 }
+                paint: { 
+                    "fill-color": COLORS[0], 
+                    "fill-opacity": 0.7 // Starts at 70%
+                }
             },
             {
                 id: "haz_outline",
                 type: "line",
                 source: "hazard",
                 "source-layer": SOURCE_LAYER,
-                paint: { "line-color": "#00ffff", "line-width": 3, "line-opacity": 0 },
+                paint: { 
+                    "line-color": "#00ffff", 
+                    "line-width": 3, 
+                    "line-opacity": 0.7 // Starts at 70%
+                },
                 filter: ["==", ["get", "NON_EXISTENT"], ""]
             }
         ]
@@ -220,18 +227,20 @@ map.on("click", "haz_fill", (e) => {
     }
 
     map.setFilter("haz_outline", ["==", ["get", DETECTED_ID_FIELD], props[DETECTED_ID_FIELD]]);
-    map.setPaintProperty("haz_outline", "line-opacity", 1);
+    
+    const currentOpacity = opacitySlider.value / 100;
+    map.setPaintProperty("haz_outline", "line-opacity", currentOpacity);
 
     const multiplier = computeUserProb();
     let html = `<div style="padding:5px; font-family:sans-serif; min-width:160px;">
         <b style="font-size:13px;">Adjusted Hazard Data</b><br>
-        <small style="color:#777;">Multiplier: ${multiplier.toFixed(8)}</small>
+        <small style="color:#777;">Multiplier: ${multiplier.toFixed(4)}</small>
         <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
         <table style="font-size:11px; width:100%; border-collapse:collapse;">`;
 
     for(const r of RETURN_PERIODS){
         const raw = parseFloat(props[r.field]) || 0;
-        const multiplied = (raw * multiplier * 100).toFixed(6) + "%";  
+        const multiplied = (raw * multiplier * 100).toFixed(4) + "%";  
         html += `<tr style="border-bottom:1px solid #f9f9f9;">
                     <td style="padding:3px 0; color:#444;">${r.label}:</td>
                     <td style="text-align:right;"><b>${multiplied}</b></td>
@@ -252,6 +261,7 @@ userArea.oninput = updateMap;
 opacitySlider.oninput = (e) => {
     const val = e.target.value / 100;
     map.setPaintProperty("haz_fill", "fill-opacity", val);
+    // Only show outline opacity if an outline is currently active (filter is not NON_EXISTENT)
     map.setPaintProperty("haz_outline", "line-opacity", val);
     opacityVal.innerText = e.target.value + "%";
 };
