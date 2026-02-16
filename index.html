@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Hazard Explorer - Mobile Ready</title>
+<title>Hazard Explorer - Ultra Mobile</title>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
 <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
@@ -11,53 +11,53 @@
 <style>
 html, body, #map { height:100%; margin:0; background:#000; overflow: hidden; }
 
-/* Control Panel Base */
 .control {
     position:absolute; top:10px; left:10px; z-index:10;
-    background:rgba(255,255,255,0.95); border-radius:12px;
-    font:13px/1.4 system-ui, -apple-system, sans-serif;
-    width:280px; box-shadow:0 4px 20px rgba(0,0,0,0.3);
-    transition: all 0.3s ease; display: flex; flex-direction: column;
+    background:rgba(255,255,255,0.92); border-radius:10px;
+    font:12px/1.2 system-ui, sans-serif;
+    width:260px; box-shadow:0 2px 10px rgba(0,0,0,0.3);
+    transition: all 0.2s ease-in-out;
 }
 
-/* Header/Toggle Area */
 .control-header {
-    padding: 12px 15px; display: flex; justify-content: space-between;
-    align-items: center; cursor: pointer; border-bottom: 1px solid transparent;
+    padding: 10px 12px; display: flex; justify-content: space-between;
+    align-items: center; cursor: pointer;
 }
-.control-header b { font-size: 15px; color: #222; }
-.minimize-icon { font-size: 18px; font-weight: bold; color: #666; transition: transform 0.3s; }
+.control-header b { font-size: 14px; }
 
-/* Collapsible Content */
 .control-content {
-    padding: 0 15px 15px 15px; overflow-y: auto; max-height: 80vh;
+    padding: 0 12px 12px 12px; 
+    overflow-y: auto; 
+    max-height: 70vh; /* Limits height on desktop */
 }
 
-/* Minimized State */
-.control.minimized { width: 200px; }
+/* Minimized Logic */
 .control.minimized .control-content { display: none; }
-.control.minimized .minimize-icon { transform: rotate(180deg); }
-.control.minimized .control-header { border-bottom: none; }
+.control.minimized { width: 150px; }
 
-/* Form Elements */
-.section-title { font-weight:bold; color:#444; display:block; margin-top:12px; }
-select, input { 
-    width:100%; margin-top:5px; padding:8px; border:1px solid #ccc; 
-    border-radius:6px; font-size:14px; box-sizing:border-box;
-}
-input[type="range"] { padding: 0; }
-
-.legend-grid { display:grid; grid-template-columns:22px 1fr; gap:6px 10px; margin-top:10px; }
-.swatch { width:22px; height:14px; border-radius:3px; border:1px solid rgba(0,0,0,0.1); }
-.slider-label { display:flex; justify-content:space-between; margin-top:15px; font-weight:bold; color:#444; }
-
-/* Mobile Optimizations */
+/* Mobile Portrait Optimization */
 @media (max-width: 480px) {
-    .control { width: calc(100% - 20px); top: 10px; left: 10px; }
-    .control.minimized { width: 160px; }
-    .control-header b { font-size: 13px; }
-    .section-title { margin-top: 8px; }
+    .control { 
+        width: 92%; 
+        left: 4%; 
+        top: 8px; 
+    }
+    .control-content {
+        max-height: 35vh; /* Panel will only occupy 35% of the screen height */
+    }
+    .section-title { margin-top: 6px; font-size: 11px; }
+    select, input { padding: 6px; font-size: 13px; }
+    .control.minimized { width: 140px; left: 10px; }
 }
+
+.section-title { font-weight:bold; color:#444; display:block; margin-top:10px; }
+select, input { 
+    width:100%; margin-top:4px; border:1px solid #ccc; 
+    border-radius:5px; box-sizing:border-box;
+}
+.legend-grid { display:grid; grid-template-columns:18px 1fr; gap:4px 8px; margin-top:8px; font-size: 11px; }
+.swatch { width:18px; height:12px; border-radius:2px; }
+.slider-label { display:flex; justify-content:space-between; margin-top:10px; font-weight:bold; }
 </style>
 </head>
 <body>
@@ -67,60 +67,63 @@ input[type="range"] { padding: 0; }
 <div class="control" id="controlPanel">
     <div class="control-header" onclick="toggleMinimize()">
         <b>Hazard Explorer</b>
-        <span class="minimize-icon" id="minBtn">−</span>
+        <span id="minBtn" style="font-weight:bold; color:#888;">−</span>
     </div>
     
     <div class="control-content">
         <label class="section-title">Return Period:</label>
         <select id="returnPeriod"></select>
 
-        <label class="section-title">Landslide Area (sqm):</label>
-        <input type="number" id="userArea" value="0" step="0.1" min="0">
-
-        <label class="section-title">Resulting Probability:</label>
-        <input type="text" id="userProb" value="1.0000" readonly style="background:#f0f0f0; border-color:#ddd; text-align:right;">
+        <div style="display: flex; gap: 10px;">
+            <div style="flex: 1;">
+                <label class="section-title">Area (sqm):</label>
+                <input type="number" id="userArea" value="0" step="0.1" min="0">
+            </div>
+            <div style="flex: 1;">
+                <label class="section-title">Prob:</label>
+                <input type="text" id="userProb" value="1.0000" readonly style="background:#f9f9f9; border:none; color:#d9534f; font-weight:bold;">
+            </div>
+        </div>
 
         <div class="slider-label">
-            <span>Map Opacity</span>
+            <span>Opacity</span>
             <span id="opacityVal">70%</span>
         </div>
         <input type="range" id="opacitySlider" min="0" max="100" value="70">
 
-        <div style="margin-top:15px; border-top:1px solid #eee; padding-top:10px;">
-            <b style="color:#444;">Adjusted Legend</b>
+        <div style="margin-top:10px; border-top:1px solid #ddd; padding-top:8px;">
             <div class="legend-grid" id="legend"></div>
         </div>
-        <div id="status" style="margin-top:12px; font-size:10px; color:#888;">Initializing...</div>
+        <div id="status" style="font-size:9px; color:#999; margin-top:5px;">Init...</div>
     </div>
 </div>
 
 <script>
-// ---------------- CONFIG ----------------
+// --- CONFIG (URLs & Layers) ---
 const PMTILES_FILE = "https://media.githubusercontent.com/media/gcf-mgb/Probabilistic_test/main/Temp_Prob_v2.pmtiles";
 const SOURCE_LAYER = "slope_units";
 const CSV_FILE = "probability_lookup_1_to_5000.csv"; 
 let DETECTED_ID_FIELD = "OBJECTID1";
 
 const RETURN_PERIODS = [
-    { field: "prob_2",   label: "2 year RP" },
-    { field: "prob_5",   label: "5 year RP" },
-    { field: "prob_10",  label: "10 year RP" },
-    { field: "prob_15",  label: "15 year RP" },
-    { field: "prob_20",  label: "20 year RP" },
-    { field: "prob_25",  label: "25 year RP" },
-    { field: "prob_50",  label: "50 year RP" },
-    { field: "prob_100", label: "100 year RP" }
+    { field: "prob_2",   label: "2y RP" },
+    { field: "prob_5",   label: "5y RP" },
+    { field: "prob_10",  label: "10y RP" },
+    { field: "prob_15",  label: "15y RP" },
+    { field: "prob_20",  label: "20y RP" },
+    { field: "prob_25",  label: "25y RP" },
+    { field: "prob_50",  label: "50y RP" },
+    { field: "prob_100", label: "100y RP" }
 ];
-
 const COLORS = ["#147218","#7CB815","#F2FE2A","#FFAC18","#FE3C19"];
 
+// --- UI Logic ---
 const select = document.getElementById("returnPeriod");
 const userArea = document.getElementById("userArea");
 const userProb = document.getElementById("userProb");
 const opacitySlider = document.getElementById("opacitySlider");
 const opacityVal = document.getElementById("opacityVal");
 
-// UI Toggle Function
 function toggleMinimize() {
     const panel = document.getElementById("controlPanel");
     const btn = document.getElementById("minBtn");
@@ -128,7 +131,6 @@ function toggleMinimize() {
     btn.innerText = panel.classList.contains("minimized") ? "+" : "−";
 }
 
-// ---------------- Logic Scripts ----------------
 RETURN_PERIODS.forEach((r,i)=>{ 
     const o=document.createElement("option"); o.value=i; o.textContent=r.label; select.appendChild(o); 
 });
@@ -146,7 +148,7 @@ async function loadProbCSV() {
                     const prob = parseFloat(row["Probability_P(A_L_greater_than_Area)"]);
                     if(!isNaN(area) && !isNaN(prob)) probLookup[area] = prob;
                 });
-                document.getElementById("status").innerText = "✅ Data Ready";
+                document.getElementById("status").innerText = "✅ Ready";
                 updateMap();
             }
         });
@@ -179,6 +181,7 @@ function fillColor(field) {
     ];
 }
 
+// --- MAP INIT ---
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 const p = new pmtiles.PMTiles(PMTILES_FILE);
@@ -203,7 +206,7 @@ const map = new maplibregl.Map({
             },
             {
                 id: "haz_outline", type: "line", source: "hazard", "source-layer": SOURCE_LAYER,
-                paint: { "line-color": "#00ffff", "line-width": 3, "line-opacity": 0 },
+                paint: { "line-color": "#00ffff", "line-width": 2, "line-opacity": 0 },
                 filter: ["==", ["get", "NON_EXISTENT"], ""]
             }
         ]
@@ -214,7 +217,7 @@ map.on("load", async () => {
     buildLegend();
     try {
         const h = await p.getHeader();
-        map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], {padding: 30, duration: 0});
+        map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], {padding: 20, duration: 0});
     } catch (e) {}
     await loadProbCSV();
 });
@@ -233,20 +236,18 @@ map.on("click", "haz_fill", (e) => {
         for(let f of possibleFields){ if(f in props){ DETECTED_ID_FIELD=f; break; } }
     }
     map.setFilter("haz_outline", ["==", ["get", DETECTED_ID_FIELD], props[DETECTED_ID_FIELD]]);
-    map.setPaintProperty("haz_outline", "line-opacity", opacitySlider.value / 100);
+    map.setPaintProperty("haz_outline", "line-opacity", 1);
 
     const m = computeUserProb();
-    let html = `<div style="padding:5px; font-family:sans-serif; min-width:140px;">
-        <b style="font-size:13px;">Adjusted Data</b><br>
-        <small style="color:#777;">Multiplier: ${m.toFixed(4)}</small>
-        <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
-        <table style="font-size:11px; width:100%; border-collapse:collapse;">`;
+    let html = `<div style="font-size:11px; font-family:sans-serif;">
+        <b>Adjusted Hazard</b><br>
+        <table style="width:100%; border-collapse:collapse; margin-top:5px;">`;
 
     for(const r of RETURN_PERIODS){
         const val = (parseFloat(props[r.field]) || 0) * m * 100;
-        html += `<tr style="border-bottom:1px solid #f9f9f9;">
-                    <td style="padding:3px 0; color:#444;">${r.label}:</td>
-                    <td style="text-align:right;"><b>${val.toFixed(4)}%</b></td>
+        html += `<tr style="border-bottom:1px solid #eee;">
+                    <td>${r.label}:</td>
+                    <td style="text-align:right;"><b>${val.toFixed(2)}%</b></td>
                  </tr>`;
     }
     html += `</table></div>`;
