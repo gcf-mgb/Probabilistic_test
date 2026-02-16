@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hazard Explorer - Dynamic Multiplier Edition</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/pmtiles@3.2.0/dist/pmtiles.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+<style>
+html, body, #map { height:100%; margin:0; background:#000; }
+.control {
+    position:absolute; top:12px; left:12px; z-index:10;
+    background:rgba(255,255,255,0.95); border-radius:10px; padding:15px;
+    font:12px system-ui,sans-serif; width:280px; box-shadow:0 4px 15px rgba(0,0,0,0.5);
+}
+.legend-grid { display:grid; grid-template-columns:20px 1fr; gap:6px 10px; margin-top:10px; }
+.swatch { width:20px; height:12px; border-radius:2px; border:1px solid rgba(0,0,0,0.1); }
+select,input { width:100%; margin-top:5px; cursor:pointer; box-sizing:border-box; padding:4px; }
+.section-title { font-weight:bold; color:#444; display:block; margin-top:12px; }
+.slider-label { display:flex; justify-content:space-between; margin-top:15px; font-weight:bold; color:#444; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div class="control">
+    <b style="font-size:15px;">Hazard Probability Explorer</b><br>
+
+    <label class="section-title">Select Return Period:</label>
+    <select id="returnPeriod"></select>
+
+    <label class="section-title">User Landslide Area (sqm):</label>
+    <input type="number" id="userArea" value="1000" step="0.1" min="0">
+
+    <label class="section-title">Resulting Probability:</label>
+    <input type="text" id="userProb" value="" readonly style="background:#eee; text-align:right;">
+
+    <div class="slider-label">
+        <span>Map Opacity</span>
+        <span id="opacityVal">100%</span>
+    </div>
+    <input type="range" id="opacitySlider" min="0" max="100" value="100">
+
+    <div style="margin-top:15px; border-top:1px solid #eee; padding-top:10px;">
+        <b style="color:#444;">Adjusted Probability Legend</b>
+        <div class="legend-grid" id="legend"></div>
+    </div>
+    <div id="status" style="margin-top:12px; font-size:10px; color:#888;">Ready</div>
+</div>
+
+<script>
+// ---------------- CONFIG ----------------
+const PMTILES_FILE = "http://localhost:5500/Temp_Prob_v2.pmtiles"; // served from Python HTTP server
+const SOURCE_LAYER = "slope_units";
+let DETECTED_ID_FIELD = "OBJECTID1";
+
+const RETURN_PERIODS = [
+    { field: "predicte_7", label: "2 year RP" }, { field: "predicte_8", label: "5 year RP" },
+    { field: "predicte_9", label: "10 year RP" }, { field: "predict_10", label: "15 year RP" },
+    { field: "predict_11", label: "20 year RP" }, { field: "predict_12", label: "25 year RP" },
+    { field: "predict_13", label: "50 year RP" }, { field: "predict_14", label: "100 year RP" }
+];
+
+const COLORS = ["#147218","#7CB815","#F2FE2A","#FFAC18","#FE3C19"];
+const BINS = [0,0.2,0.4,0.6,0.8,1.01];
+
+const select = document.getElementById("returnPeriod");
+const userArea = document.getElementById("userArea");
+const userProb = document.getElementById("userProb");
+const opacitySlider = document.getElementById("opacitySlider");
+const opacityVal = document.getElementById("opacityVal");
+
+// ---------------- Populate Return Period dropdown ----------------
+RETURN_PERIODS.forEach((r,i)=>{ 
+    const o=document.createElement("option"); o.value=i; o.textContent=r.label; select.appendChild(o); 
+});
+
+// ---------------- CSV lookup ----------------
+let probLookup = {}; // area -> probability
+
+async function loadProbCSV() {
+    try {
+        const res = await fetch("probability_lookup_1_to_5000.csv"); // relative to index.html
+        const csvText = await res.text();
+        Papa.parse(csvText, {
+            header: true,
+            skipEmptyLines: true,
+            delimiter: ",",   // change to "\t" if tab-separated
+            complete: function(results) {
+                probLookup = {};
+                results.data.forEach(row => {
+                    const area = parseFloat(row.Area_m2);
+                    const prob = parseFloat(row["Probability_P(A_L_greater_than_Area)"]);
+                    if(!isNaN(area) && !isNaN(prob)) probLookup[area] = prob;
+                });
+                console.log("✅ Probability lookup loaded", Object.keys(probLookup).length, "entries");
+                updateMap();
+            }
+        });
+    } catch(err) {
+        console.error("❌ Failed to load CSV:", err);
+    }
+}
+
+// ---------------- Compute interpolated probability ----------------
+function computeUserProb() {
+    let aL = parseFloat(userArea.value);
+    if(aL <= 0) { userProb.value="1.00000000"; return 1; }
+    aL = Math.min(Math.max(aL, 1), 5000);
+
+    const lower = Math.floor(aL);
+    const upper = Math.ceil(aL);
+    const probLower = probLookup[lower] ?? 0;
+    const probUpper = probLookup[upper] ?? probLower;
+    const prob = probLower + (probUpper - probLower) * (aL - lower);
+
+    userProb.value = prob.toFixed(8);
+    return prob;
+}
+
+// ---------------- Build Legend ----------------
+function buildLegend() {
+    const l = document.getElementById("legend");
+    const labels = ["0–20%","20–40%","40–60%","60–80%","80–100%"];
+    l.innerHTML = COLORS.map((c,i)=>`<div class="swatch" style="background:${c}"></div><div>${labels[i]}</div>`).join('');
+}
+
+// ---------------- Color expression for map ----------------
+function fillColor(field) {
+    const m = computeUserProb();
+    return ["step", ["*", ["coalesce", ["to-number", ["get", field]], 0], m],
+        COLORS[0], 0.2, COLORS[1], 0.4, COLORS[2], 0.6, COLORS[3], 0.8, COLORS[4]
+    ];
+}
+
+// ---------------- MAP INIT ----------------
+const protocol = new pmtiles.Protocol();
+maplibregl.addProtocol("pmtiles", protocol.tile);
+const p = new pmtiles.PMTiles(PMTILES_FILE);
+protocol.add(p);
+
+const map = new maplibregl.Map({
+    container:"map",
+    style:{
+        version:8,
+        sources:{
+            "google-satellite": {type:"raster", tiles:["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"], tileSize:256, attribution:"Google"},
+            hazard:{type:"vector", url:`pmtiles://${PMTILES_FILE}`}
+        },
+        layers:[
+            {id:"satellite", type:"raster", source:"google-satellite"},
+            {
+                id:"haz_fill",
+                type:"fill",
+                source:"hazard",
+                "source-layer":SOURCE_LAYER,
+                paint:{ "fill-color":COLORS[0], "fill-opacity":1 }
+            },
+            {
+                id:"haz_outline",
+                type:"line",
+                source:"hazard",
+                "source-layer":SOURCE_LAYER,
+                paint:{ "line-color":"#00ffff", "line-width":3, "line-opacity":0 },
+                filter:["==",["get","NON_EXISTENT"],""]
+            }
+        ]
+    }
+});
+
+map.on("load", async ()=>{
+    buildLegend();
+    const h = await p.getHeader();
+    map.fitBounds([[h.minLon,h.minLat],[h.maxLon,h.maxLat]], {padding:50, duration:0});
+    await loadProbCSV();
+});
+
+// ---------------- Update Map ----------------
+function updateMap(){
+    const rpField = RETURN_PERIODS[select.value].field;
+    const colorExpr = fillColor(rpField);
+    map.setPaintProperty("haz_fill","fill-color", colorExpr);
+}
+
+// ---------------- Popup ----------------
+const popup = new maplibregl.Popup({closeButton:true, closeOnClick:true});
+
+map.on("click","haz_fill",(e)=>{
+    const props = e.features[0].properties;
+
+    if(!(DETECTED_ID_FIELD in props)){
+        const possibleFields = ["OBJECTID","FID","id","fid","id_0"];
+        for(let f of possibleFields){ if(f in props){ DETECTED_ID_FIELD=f; break; } }
+    }
+
+    map.setFilter("haz_outline",["==",["get",DETECTED_ID_FIELD],props[DETECTED_ID_FIELD]]);
+    map.setPaintProperty("haz_outline","line-opacity",1);
+
+    const multiplier = computeUserProb();
+
+    let html = `<div style="padding:5px; font-family:sans-serif; min-width:160px;">
+        <b style="font-size:13px;">Adjusted Hazard Data</b><br>
+        <small style="color:#777;">Multiplier (from user area): ${multiplier.toFixed(8)}</small>
+        <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
+        <table style="font-size:11px; width:100%; border-collapse:collapse;">`;
+
+    for(const r of RETURN_PERIODS){
+        const raw = parseFloat(props[r.field]) || 0;
+        const multiplied = (raw * multiplier * 100).toFixed(6) + "%";  
+        html += `<tr style="border-bottom:1px solid #f9f9f9;">
+                    <td style="padding:3px 0; color:#444;">${r.label}:</td>
+                    <td style="text-align:right;"><b>${multiplied}</b></td>
+                 </tr>`;
+    }
+    html += `</table></div>`;
+
+    popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
+});
+
+popup.on('close',()=>{
+    map.setFilter("haz_outline",["==",["get","NON_EXISTENT"],""]);
+    map.setPaintProperty("haz_outline","line-opacity",0);
+});
+
+// ---------------- Event Listeners ----------------
+select.onchange = updateMap;
+userArea.oninput = updateMap;
+opacitySlider.oninput = (e)=>{
+    const val = e.target.value/100;
+    map.setPaintProperty("haz_fill","fill-opacity",val);
+    map.setPaintProperty("haz_outline","line-opacity",val);
+    opacityVal.innerText = e.target.value+"%";
+};
+</script>
+</body>
+</html>
