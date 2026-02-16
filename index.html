@@ -34,7 +34,7 @@ select,input { width:100%; margin-top:5px; cursor:pointer; box-sizing:border-box
     <input type="number" id="userArea" value="0" step="0.1" min="0">
 
     <label class="section-title">Resulting Probability:</label>
-    <input type="text" id="userProb" value="0.0000" readonly style="background:#eee; text-align:right;">
+    <input type="text" id="userProb" value="1.0000" readonly style="background:#eee; text-align:right;">
 
     <div class="slider-label">
         <span>Map Opacity</span>
@@ -75,23 +75,20 @@ const userProb = document.getElementById("userProb");
 const opacitySlider = document.getElementById("opacitySlider");
 const opacityVal = document.getElementById("opacityVal");
 
-// ---------------- UI: Populate Dropdown ----------------
+// ---------------- UI Init ----------------
 RETURN_PERIODS.forEach((r,i)=>{ 
     const o=document.createElement("option"); o.value=i; o.textContent=r.label; select.appendChild(o); 
 });
 
-// ---------------- Logic: CSV lookup ----------------
+// ---------------- Logic: CSV ----------------
 let probLookup = {}; 
-
 async function loadProbCSV() {
     try {
         const res = await fetch(CSV_FILE);
         if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-
         const csvText = await res.text();
         Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
+            header: true, skipEmptyLines: true,
             complete: function(results) {
                 probLookup = {};
                 results.data.forEach(row => {
@@ -99,35 +96,31 @@ async function loadProbCSV() {
                     const prob = parseFloat(row["Probability_P(A_L_greater_than_Area)"]);
                     if(!isNaN(area) && !isNaN(prob)) probLookup[area] = prob;
                 });
-                
                 if (Object.keys(probLookup).length > 0) {
                     document.getElementById("status").innerText = "✅ Data Loaded";
                     updateMap();
-                } else {
-                    document.getElementById("status").innerText = "⚠️ CSV Format Error";
                 }
             }
         });
     } catch(err) {
-        console.error("❌ Failed to load CSV:", err);
         document.getElementById("status").innerText = "❌ CSV Not Found";
     }
 }
 
-// ---------------- Logic: Interpolation (4 Decimals) ----------------
+// ---------------- Logic: Multiplier ----------------
 function computeUserProb() {
     let aL = parseFloat(userArea.value);
-    // Modified to start at 0
-    if(aL <= 0) { userProb.value="0.0000"; return 0; }
+    // If area is 0, multiplier is 1 (100% chance)
+    if(aL <= 0 || isNaN(aL)) { userProb.value="1.0000"; return 1; }
+    
     aL = Math.min(Math.max(aL, 1), 5000);
-
     const lower = Math.floor(aL);
     const upper = Math.ceil(aL);
     const probLower = probLookup[lower] ?? 0;
     const probUpper = probLookup[upper] ?? probLower;
     const prob = probLower + (probUpper - probLower) * (aL - lower);
 
-    userProb.value = prob.toFixed(4); // 4 decimal places
+    userProb.value = prob.toFixed(4);
     return prob;
 }
 
@@ -138,7 +131,7 @@ function buildLegend() {
     l.innerHTML = COLORS.map((c,i)=>`<div class="swatch" style="background:${c}"></div><div>${labels[i]}</div>`).join('');
 }
 
-// ---------------- Map: Styles ----------------
+// ---------------- Map: Logic ----------------
 function fillColor(field) {
     const m = computeUserProb();
     return ["step", ["*", ["coalesce", ["to-number", ["get", field]], 0], m],
@@ -146,7 +139,6 @@ function fillColor(field) {
     ];
 }
 
-// ---------------- MAP INITIALIZATION ----------------
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 const p = new pmtiles.PMTiles(PMTILES_FILE);
@@ -158,38 +150,20 @@ const map = new maplibregl.Map({
         version: 8,
         sources: {
             "google-satellite": {
-                type: "raster", 
-                tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"], 
-                tileSize: 256, 
-                attribution: "Google"
+                type: "raster", tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"], 
+                tileSize: 256, attribution: "Google"
             },
-            hazard: {
-                type: "vector", 
-                url: `pmtiles://${PMTILES_FILE}` 
-            }
+            hazard: { type: "vector", url: `pmtiles://${PMTILES_FILE}` }
         },
         layers: [
             { id: "satellite", type: "raster", source: "google-satellite" },
             {
-                id: "haz_fill",
-                type: "fill",
-                source: "hazard",
-                "source-layer": SOURCE_LAYER,
-                paint: { 
-                    "fill-color": COLORS[0], 
-                    "fill-opacity": 0.7 // Starts at 70%
-                }
+                id: "haz_fill", type: "fill", source: "hazard", "source-layer": SOURCE_LAYER,
+                paint: { "fill-color": COLORS[0], "fill-opacity": 0.7 }
             },
             {
-                id: "haz_outline",
-                type: "line",
-                source: "hazard",
-                "source-layer": SOURCE_LAYER,
-                paint: { 
-                    "line-color": "#00ffff", 
-                    "line-width": 3, 
-                    "line-opacity": 0.7 // Starts at 70%
-                },
+                id: "haz_outline", type: "line", source: "hazard", "source-layer": SOURCE_LAYER,
+                paint: { "line-color": "#00ffff", "line-width": 3, "line-opacity": 0 },
                 filter: ["==", ["get", "NON_EXISTENT"], ""]
             }
         ]
@@ -201,53 +175,41 @@ map.on("load", async () => {
     try {
         const h = await p.getHeader();
         map.fitBounds([[h.minLon, h.minLat], [h.maxLon, h.maxLat]], {padding: 50, duration: 0});
-    } catch (e) {
-        console.error("PMTiles header error:", e);
-    }
+    } catch (e) {}
     await loadProbCSV();
 });
 
-// ---------------- Interaction ----------------
 function updateMap(){
     const rpField = RETURN_PERIODS[select.value].field;
-    const colorExpr = fillColor(rpField);
-    if (map.getLayer("haz_fill")) {
-        map.setPaintProperty("haz_fill", "fill-color", colorExpr);
-    }
+    map.setPaintProperty("haz_fill", "fill-color", fillColor(rpField));
 }
 
 const popup = new maplibregl.Popup({closeButton: true, closeOnClick: true});
 
 map.on("click", "haz_fill", (e) => {
     const props = e.features[0].properties;
-
     if(!(DETECTED_ID_FIELD in props)){
         const possibleFields = ["OBJECTID","FID","id","fid","id_0"];
         for(let f of possibleFields){ if(f in props){ DETECTED_ID_FIELD=f; break; } }
     }
-
     map.setFilter("haz_outline", ["==", ["get", DETECTED_ID_FIELD], props[DETECTED_ID_FIELD]]);
-    
-    const currentOpacity = opacitySlider.value / 100;
-    map.setPaintProperty("haz_outline", "line-opacity", currentOpacity);
+    map.setPaintProperty("haz_outline", "line-opacity", opacitySlider.value / 100);
 
-    const multiplier = computeUserProb();
+    const m = computeUserProb();
     let html = `<div style="padding:5px; font-family:sans-serif; min-width:160px;">
         <b style="font-size:13px;">Adjusted Hazard Data</b><br>
-        <small style="color:#777;">Multiplier: ${multiplier.toFixed(4)}</small>
+        <small style="color:#777;">Multiplier: ${m.toFixed(4)}</small>
         <hr style="margin:5px 0; border:0; border-top:1px solid #eee;">
         <table style="font-size:11px; width:100%; border-collapse:collapse;">`;
 
     for(const r of RETURN_PERIODS){
-        const raw = parseFloat(props[r.field]) || 0;
-        const multiplied = (raw * multiplier * 100).toFixed(4) + "%";  
+        const val = (parseFloat(props[r.field]) || 0) * m * 100;
         html += `<tr style="border-bottom:1px solid #f9f9f9;">
                     <td style="padding:3px 0; color:#444;">${r.label}:</td>
-                    <td style="text-align:right;"><b>${multiplied}</b></td>
+                    <td style="text-align:right;"><b>${val.toFixed(4)}%</b></td>
                  </tr>`;
     }
     html += `</table></div>`;
-
     popup.setLngLat(e.lngLat).setHTML(html).addTo(map);
 });
 
@@ -261,8 +223,6 @@ userArea.oninput = updateMap;
 opacitySlider.oninput = (e) => {
     const val = e.target.value / 100;
     map.setPaintProperty("haz_fill", "fill-opacity", val);
-    // Only show outline opacity if an outline is currently active (filter is not NON_EXISTENT)
-    map.setPaintProperty("haz_outline", "line-opacity", val);
     opacityVal.innerText = e.target.value + "%";
 };
 </script>
