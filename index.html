@@ -51,7 +51,7 @@ select,input { width:100%; margin-top:5px; cursor:pointer; box-sizing:border-box
 
 <script>
 // ---------------- CONFIG ----------------
-const PMTILES_FILE = "/Temp_Prob_v2.pmtiles";
+const PMTILES_FILE = "https://media.githubusercontent.com/media/gcf-mgb/Probabilistic_test/main/Temp_Prob_v2.pmtiles";
 const SOURCE_LAYER = "slope_units";
 let DETECTED_ID_FIELD = "OBJECTID1";
 
@@ -150,39 +150,63 @@ function fillColor(field) {
 }
 
 // ---------------- MAP INIT ----------------
+// 2. Setup the PMTiles Protocol
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
+
+// 3. Create the PMTiles instance with the full URL
 const p = new pmtiles.PMTiles(PMTILES_FILE);
 protocol.add(p);
 
+// 4. Initialize the Map
 const map = new maplibregl.Map({
-    container:"map",
-    style:{
-        version:8,
-        sources:{
-            "google-satellite": {type:"raster", tiles:["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"], tileSize:256, attribution:"Google"},
-            hazard:{type:"vector", url:`pmtiles://${PMTILES_FILE}`}
+    container: "map",
+    style: {
+        version: 8,
+        sources: {
+            "google-satellite": {
+                type: "raster", 
+                tiles: ["https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}"], 
+                tileSize: 256, 
+                attribution: "Google"
+            },
+            hazard: {
+                type: "vector", 
+                // Using the pmtiles:// protocol with the full URL is required
+                url: `pmtiles://${PMTILES_FILE}` 
+            }
         },
-        layers:[
-            {id:"satellite", type:"raster", source:"google-satellite"},
+        layers: [
             {
-                id:"haz_fill",
-                type:"fill",
-                source:"hazard",
-                "source-layer":SOURCE_LAYER,
-                paint:{ "fill-color":COLORS[0], "fill-opacity":1 }
+                id: "satellite", 
+                type: "raster", 
+                source: "google-satellite"
             },
             {
-                id:"haz_outline",
-                type:"line",
-                source:"hazard",
-                "source-layer":SOURCE_LAYER,
-                paint:{ "line-color":"#00ffff", "line-width":3, "line-opacity":0 },
-                filter:["==",["get","NON_EXISTENT"],""]
+                id: "haz_fill",
+                type: "fill",
+                source: "hazard",
+                "source-layer": SOURCE_LAYER,
+                paint: { 
+                    "fill-color": COLORS[0], 
+                    "fill-opacity": 1 
+                }
+            },
+            {
+                id: "haz_outline",
+                type: "line",
+                source: "hazard",
+                "source-layer": SOURCE_LAYER,
+                paint: { 
+                    "line-color": "#00ffff", 
+                    "line-width": 3, 
+                    "line-opacity": 0 
+                },
+                filter: ["==", ["get", "NON_EXISTENT"], ""]
             }
         ]
     }
-});
+});;
 
 map.on("load", async ()=>{
     buildLegend();
